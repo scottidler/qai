@@ -1,0 +1,49 @@
+otto:
+  api: 1
+  tasks:
+    - ci
+  envs:
+    VERSION: "$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
+
+tasks:
+  lint:
+    help: "Run whitespace linting"
+    bash: |
+      whitespace -r
+
+  check:
+    help: "Run all quality checks (compile, clippy, format)"
+    bash: |
+      echo "=== Checking compilation ==="
+      cargo check
+      echo ""
+      echo "=== Running Clippy ==="
+      cargo clippy -- -D warnings
+      echo ""
+      echo "=== Checking format ==="
+      cargo fmt -- --check
+      echo ""
+      echo "✅ All checks passed!"
+
+  test:
+    help: "Run all tests"
+    bash: |
+      cargo test
+
+  cov:
+    help: "Run tests with coverage via tarpaulin"
+    after: [check]
+    bash: |
+      cargo tarpaulin --workspace --timeout 120
+
+  ci:
+    help: "Full CI pipeline (lint + check in parallel, then cov)"
+    before: [lint, check, cov]
+    bash: |
+      echo "✅ All CI checks passed!"
+
+  clean:
+    help: "Clean build artifacts"
+    bash: |
+      cargo clean
+      echo "✅ Cleaned!"
