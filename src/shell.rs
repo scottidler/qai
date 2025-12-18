@@ -134,15 +134,19 @@ _qai_submit() {
     fi
 }
 
-# Ctrl+C handler
-_qai_interrupt() {
+# TRAPINT handles Ctrl+C at signal level (the ONLY reliable way in zsh)
+# This fires BEFORE any widget, so we can intercept cleanly
+TRAPINT() {
     if [[ $_qai_in_ai_mode -eq 1 ]]; then
-        _qai_exit
-    else
-        # Normal interrupt behavior
+        _qai_in_ai_mode=0
+        PROMPT="$_qai_saved_prompt"
         BUFFER=""
-        zle reset-prompt
+        print ""  # newline
+        zle && zle reset-prompt
+        return 128  # indicate interrupt was handled, don't propagate
     fi
+    # Not in AI mode - let default SIGINT behavior happen
+    return $((128 + $1))
 }
 
 # Register widgets
@@ -150,12 +154,13 @@ zle -N _qai_tab_handler
 zle -N _qai_start
 zle -N _qai_exit
 zle -N _qai_submit
-zle -N _qai_interrupt
 
-# Bind keys
+# Bind keys - ONLY Tab and Enter need custom handling
+# Tab: triggers AI mode when buffer is "ai", otherwise normal completion
+# Enter: submits query in AI mode, otherwise normal accept-line
 bindkey '^I' _qai_tab_handler  # Tab
 bindkey '^M' _qai_submit       # Enter
-bindkey '^C' _qai_interrupt    # Ctrl+C
+# Ctrl+C is handled by TRAPINT above (signal level, not bindkey)
 "#;
 
 /// Generate shell init script for the specified shell
@@ -254,36 +259,35 @@ mod tests {
     }
 
     #[test]
-    fn test_zsh_init_script_interrupt_handler() {
-        let script = ZSH_INIT_SCRIPT;
-
-        // Must have interrupt function
-        assert!(script.contains("_qai_interrupt()"));
-
-        // Calls exit when in AI mode
-        assert!(script.contains("_qai_exit"));
-    }
-
-    #[test]
     fn test_zsh_init_script_widget_registration() {
         let script = ZSH_INIT_SCRIPT;
 
-        // All widgets registered
+        // Core widgets registered
         assert!(script.contains("zle -N _qai_tab_handler"));
         assert!(script.contains("zle -N _qai_start"));
         assert!(script.contains("zle -N _qai_exit"));
         assert!(script.contains("zle -N _qai_submit"));
-        assert!(script.contains("zle -N _qai_interrupt"));
     }
 
     #[test]
     fn test_zsh_init_script_key_bindings() {
         let script = ZSH_INIT_SCRIPT;
 
-        // Key bindings
+        // Only Tab and Enter are bound - minimal footprint
         assert!(script.contains("bindkey '^I' _qai_tab_handler")); // Tab
         assert!(script.contains("bindkey '^M' _qai_submit")); // Enter
-        assert!(script.contains("bindkey '^C' _qai_interrupt")); // Ctrl+C
+        // Ctrl+C handled by TRAPINT, not bindkey
+    }
+
+    #[test]
+    fn test_zsh_init_script_trapint_handler() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // TRAPINT handles Ctrl+C at signal level (only reliable way)
+        assert!(script.contains("TRAPINT()"));
+        assert!(script.contains("_qai_in_ai_mode -eq 1"));
+        // Returns 128 to indicate handled
+        assert!(script.contains("return 128"));
     }
 
     #[test]

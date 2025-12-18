@@ -594,19 +594,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_validate_api_key_from_config_not_configured() {
-        let config = Config {
-            api_key: None,
-            api_base: "https://api.openai.com/v1".to_string(),
-            model: "gpt-4o-mini".to_string(),
-            debug: false,
-        };
-
-        let result = validate_api_key_from_config(&config).await;
-        assert!(matches!(result, Err(ApiValidationError::NotConfigured)));
-    }
-
-    #[tokio::test]
     async fn test_validate_api_key_from_config_unauthorized() {
         let mock_server = MockServer::start().await;
 

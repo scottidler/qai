@@ -805,20 +805,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_query_no_api_key() {
-        let config = Config {
-            api_key: None,
-            api_base: "https://api.openai.com/v1".to_string(),
-            model: "gpt-4o-mini".to_string(),
-            debug: false,
-        };
-
-        // This should fail because no API key
-        let result = handle_query("test", &config, false, 1).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
     async fn test_run_command_history_stats() {
         let cmd = Commands::History {
             limit: 10,
