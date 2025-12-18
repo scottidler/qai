@@ -6,12 +6,14 @@ use std::path::PathBuf;
 mod api;
 mod cli;
 mod config;
+mod history;
 mod prompt;
 mod shell;
 
 use api::{OpenAIClient, validate_api_key_from_config};
 use cli::{Cli, Commands, check_api_key_configured, check_fzf_status};
 use config::Config;
+use history::HistoryStore;
 use prompt::{PromptContext, load_system_prompt, render_prompt};
 use shell::generate_init_script;
 
@@ -159,6 +161,67 @@ pub fn join_query(words: &[String]) -> String {
     words.join(" ")
 }
 
+/// Handle history command
+fn handle_history(limit: usize, patterns: bool, stats: bool, clear: bool) -> Result<()> {
+    let mut store = HistoryStore::new().context("Failed to open history store")?;
+
+    if clear {
+        store.clear()?;
+        println!("History cleared.");
+        return Ok(());
+    }
+
+    if stats {
+        let stats = store.stats()?;
+        println!("History Statistics:");
+        println!("  Total queries:    {}", stats.total_queries);
+        println!("  Unique patterns:  {}", stats.unique_patterns);
+        println!("  With preferences: {}", stats.patterns_with_preference);
+        return Ok(());
+    }
+
+    if patterns {
+        let patterns = store.get_patterns_by_usage();
+        if patterns.is_empty() {
+            println!("No patterns recorded yet.");
+            return Ok(());
+        }
+
+        println!("Query Patterns (by usage):\n");
+        for pattern in patterns.iter().take(limit) {
+            println!(
+                "  \"{}\" (used {} times)",
+                pattern.normalized_query, pattern.query_count
+            );
+            if let Some(preferred) = &pattern.preferred_command {
+                println!("    → preferred: {}", preferred);
+            }
+            println!();
+        }
+        return Ok(());
+    }
+
+    // Show recent queries
+    let records = store.get_recent_queries(limit)?;
+    if records.is_empty() {
+        println!("No queries recorded yet.");
+        return Ok(());
+    }
+
+    println!("Recent Queries:\n");
+    for record in records {
+        let time = record.timestamp.format("%Y-%m-%d %H:%M");
+        println!("  [{}] \"{}\"", time, record.query);
+        if let Some(cmd) = record.final_command() {
+            let status = if record.executed { "✓" } else { " " };
+            println!("    {} {}", status, cmd);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
 /// Process a command and return result (for testing)
 pub async fn run_command(command: Option<&Commands>, config_path: Option<&PathBuf>) -> Result<()> {
     match command {
@@ -172,6 +235,12 @@ pub async fn run_command(command: Option<&Commands>, config_path: Option<&PathBu
             let config = Config::load(config_path).context("Failed to load configuration")?;
             handle_validate_api(&config).await
         }
+        Some(Commands::History {
+            limit,
+            patterns,
+            stats,
+            clear,
+        }) => handle_history(*limit, *patterns, *stats, *clear),
         None => {
             use clap::CommandFactory;
             let after_help = build_status_footer();
@@ -218,6 +287,17 @@ async fn main() -> Result<()> {
         Some(Commands::ValidateApi) => {
             let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
             if let Err(e) = handle_validate_api(&config).await {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::History {
+            limit,
+            patterns,
+            stats,
+            clear,
+        }) => {
+            if let Err(e) = handle_history(*limit, *patterns, *stats, *clear) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -637,5 +717,41 @@ mod tests {
         // This should fail because no API key
         let result = handle_query("test", &config, false, 1).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_history_stats() {
+        let cmd = Commands::History {
+            limit: 10,
+            patterns: false,
+            stats: true,
+            clear: false,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_history_default() {
+        let cmd = Commands::History {
+            limit: 5,
+            patterns: false,
+            stats: false,
+            clear: false,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_history_patterns() {
+        let cmd = Commands::History {
+            limit: 10,
+            patterns: true,
+            stats: false,
+            clear: false,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
     }
 }

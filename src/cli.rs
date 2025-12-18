@@ -75,6 +75,26 @@ pub enum Commands {
     /// Validate API key by calling OpenAI (no token usage)
     #[command(name = "validate-api")]
     ValidateApi,
+
+    /// Show query history and patterns
+    #[command(name = "history")]
+    History {
+        /// Number of recent queries to show
+        #[arg(short = 'n', long, default_value = "10")]
+        limit: usize,
+
+        /// Show patterns instead of recent queries
+        #[arg(short, long)]
+        patterns: bool,
+
+        /// Show statistics
+        #[arg(short, long)]
+        stats: bool,
+
+        /// Clear all history
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 /// Check if fzf is available and get its version
@@ -320,6 +340,103 @@ mod tests {
                 assert!(!multi);
             }
             _ => panic!("Expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_default() {
+        let cli = Cli::try_parse_from(["qai", "history"]).unwrap();
+        match cli.command {
+            Some(Commands::History {
+                limit,
+                patterns,
+                stats,
+                clear,
+            }) => {
+                assert_eq!(limit, 10);
+                assert!(!patterns);
+                assert!(!stats);
+                assert!(!clear);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_with_limit() {
+        let cli = Cli::try_parse_from(["qai", "history", "-n", "20"]).unwrap();
+        match cli.command {
+            Some(Commands::History { limit, .. }) => {
+                assert_eq!(limit, 20);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_patterns() {
+        let cli = Cli::try_parse_from(["qai", "history", "--patterns"]).unwrap();
+        match cli.command {
+            Some(Commands::History { patterns, .. }) => {
+                assert!(patterns);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_patterns_short() {
+        let cli = Cli::try_parse_from(["qai", "history", "-p"]).unwrap();
+        match cli.command {
+            Some(Commands::History { patterns, .. }) => {
+                assert!(patterns);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_stats() {
+        let cli = Cli::try_parse_from(["qai", "history", "--stats"]).unwrap();
+        match cli.command {
+            Some(Commands::History { stats, .. }) => {
+                assert!(stats);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_stats_short() {
+        let cli = Cli::try_parse_from(["qai", "history", "-s"]).unwrap();
+        match cli.command {
+            Some(Commands::History { stats, .. }) => {
+                assert!(stats);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_clear() {
+        let cli = Cli::try_parse_from(["qai", "history", "--clear"]).unwrap();
+        match cli.command {
+            Some(Commands::History { clear, .. }) => {
+                assert!(clear);
+            }
+            _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history_combined_flags() {
+        let cli = Cli::try_parse_from(["qai", "history", "-n", "5", "-p"]).unwrap();
+        match cli.command {
+            Some(Commands::History { limit, patterns, .. }) => {
+                assert_eq!(limit, 5);
+                assert!(patterns);
+            }
+            _ => panic!("Expected History command"),
         }
     }
 }
