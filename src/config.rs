@@ -49,10 +49,7 @@ impl Config {
     /// Check if environment variable would provide the key (for testing)
     #[cfg(test)]
     pub fn would_env_provide_key(env_value: Option<&str>) -> bool {
-        match env_value {
-            Some(key) if !key.is_empty() => true,
-            _ => false,
-        }
+        matches!(env_value, Some(key) if !key.is_empty())
     }
 
     /// Load configuration with fallback chain
@@ -161,7 +158,7 @@ model: custom-model
     #[test]
     fn test_load_empty_config_uses_defaults() {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
 
         let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
         assert_eq!(config.model, "gpt-4o-mini");

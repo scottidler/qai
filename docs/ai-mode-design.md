@@ -1818,4 +1818,3 @@ qai/
 - [aka daemon architecture](/home/saidler/repos/scottidler/aka/docs/daemon-architecture.md)
 - [fzf](https://github.com/junegunn/fzf)
 - [OpenAI API](https://platform.openai.com/docs/api-reference)
-

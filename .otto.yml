@@ -32,7 +32,6 @@ tasks:
 
   cov:
     help: "Run tests with coverage via tarpaulin"
-    after: [check]
     bash: |
       cargo tarpaulin --workspace --timeout 120
 

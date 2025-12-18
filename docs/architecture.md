@@ -212,4 +212,3 @@ EOF
 - [ ] Command history/caching
 - [ ] Streaming responses
 - [ ] Daemon mode for faster responses
-

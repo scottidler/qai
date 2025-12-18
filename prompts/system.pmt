@@ -12,4 +12,3 @@ Context:
 - Shell: {{shell}}
 - OS: {{os}}
 - Working directory: {{cwd}}
-

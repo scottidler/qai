@@ -62,12 +62,11 @@ pub fn render_prompt(template: &str, context: &PromptContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::TempDir;
 
     #[test]
     fn test_default_prompt_exists() {
-        assert!(!DEFAULT_SYSTEM_PROMPT.is_empty());
+        // Verify the prompt has content
+        assert!(DEFAULT_SYSTEM_PROMPT.len() > 100);
     }
 
     #[test]
