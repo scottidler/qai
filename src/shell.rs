@@ -6,8 +6,21 @@ pub const ZSH_INIT_SCRIPT: &str = r#"
 # qai - Natural language to shell commands
 # Add to your .zshrc: eval "$(qai shell-init zsh)"
 
-# Store original tab binding
-_qai_original_tab_widget="${$(bindkey '^I')[2]:-expand-or-complete}"
+# Store original tab binding (parse the widget name from bindkey output)
+# bindkey '^I' outputs: "^I" widget-name
+# We extract the widget name using parameter expansion
+_qai_original_tab_widget=""
+if (( ${+widgets[expand-or-complete]} )); then
+    _qai_original_tab_widget="expand-or-complete"
+fi
+# Try to get actual current binding
+_qai_tab_binding="$(bindkey '^I' 2>/dev/null)"
+if [[ "$_qai_tab_binding" == *'" '* ]]; then
+    _qai_original_tab_widget="${_qai_tab_binding##*\" }"
+fi
+# Fallback to expand-or-complete if nothing found
+[[ -z "$_qai_original_tab_widget" ]] && _qai_original_tab_widget="expand-or-complete"
+unset _qai_tab_binding
 
 # QAI expansion function
 _qai_expand() {
@@ -31,7 +44,7 @@ _qai_expand() {
         # On error, leave buffer unchanged (error printed to stderr)
     else
         # Not a qai command, use original tab behavior
-        zle "${_qai_original_tab_widget}"
+        zle "${_qai_original_tab_widget:-expand-or-complete}"
     fi
 }
 
@@ -81,6 +94,36 @@ mod tests {
 
         // Should call qai query
         assert!(script.contains("qai query"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_fallback_to_original_tab() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // CRITICAL: Must fallback to original tab widget when NOT a qai command
+        // The else branch should call the original widget
+        assert!(
+            script.contains(r#"zle "${_qai_original_tab_widget:-expand-or-complete}""#),
+            "Script must call original tab widget with fallback for non-qai commands"
+        );
+
+        // Must properly parse bindkey output to get the widget name
+        assert!(
+            script.contains(r#"_qai_tab_binding="$(bindkey '^I' 2>/dev/null)""#),
+            "Script must capture current tab binding"
+        );
+
+        // Must extract widget name from bindkey output (format: "^I" widget-name)
+        assert!(
+            script.contains(r#"${_qai_tab_binding##*\" }"#),
+            "Script must extract widget name from bindkey output"
+        );
+
+        // Must have a fallback to expand-or-complete
+        assert!(
+            script.contains(r#"_qai_original_tab_widget="expand-or-complete""#),
+            "Script must have expand-or-complete as default fallback"
+        );
     }
 
     #[test]
