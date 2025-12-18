@@ -9,6 +9,7 @@ mod config;
 mod history;
 mod prompt;
 mod shell;
+mod tools;
 
 use api::{OpenAIClient, validate_api_key_from_config};
 use cli::{Cli, Commands, check_api_key_configured, check_fzf_status};
@@ -16,6 +17,7 @@ use config::Config;
 use history::HistoryStore;
 use prompt::{PromptContext, load_system_prompt, render_prompt};
 use shell::generate_init_script;
+use tools::ToolCache;
 
 #[cfg(not(tarpaulin_include))]
 fn setup_logging() -> Result<()> {
@@ -222,6 +224,96 @@ fn handle_history(limit: usize, patterns: bool, stats: bool, clear: bool) -> Res
     Ok(())
 }
 
+/// Handle tools command
+fn handle_tools(refresh: bool, clear: bool) -> Result<()> {
+    let mut cache = ToolCache::load();
+
+    if clear {
+        cache.clear();
+        cache.save()?;
+        println!("Tool cache cleared.");
+        return Ok(());
+    }
+
+    if refresh {
+        cache.clear();
+        // Probe some common modern tools
+        let tools_to_check = [
+            "eza",
+            "exa",
+            "rg",
+            "fd",
+            "bat",
+            "delta",
+            "jq",
+            "yq",
+            "fzf",
+            "zoxide",
+            "starship",
+            "dust",
+            "procs",
+            "bottom",
+            "btm",
+            "sd",
+            "hyperfine",
+            "tokei",
+            "duf",
+            "broot",
+            "httpie",
+            "http",
+            "xh",
+            "curlie",
+            "glow",
+            "mdcat",
+            "navi",
+            "tldr",
+            "fuck",
+            "thefuck",
+            "atuin",
+            "mcfly",
+            "direnv",
+            "mise",
+            "asdf",
+            "fnm",
+            "nvm",
+            "pyenv",
+            "rbenv",
+        ];
+
+        for tool in tools_to_check {
+            cache.is_available(tool);
+        }
+        cache.save()?;
+        println!("Tool cache refreshed.");
+    }
+
+    // Display cache contents
+    let stats = cache.stats();
+    println!("Tool Cache Statistics:");
+    println!("  Available tools:     {}", stats.available_count);
+    println!("  Unavailable tools:   {}", stats.unavailable_count);
+    println!("  Modern tools found:  {}", stats.modern_tools_count);
+
+    if stats.available_count > 0 {
+        println!("\nAvailable modern tools:");
+        let prompt_hint = cache.available_tools_for_prompt();
+        if !prompt_hint.is_empty() {
+            // Extract just the tool names from the hint
+            if let Some(tools_part) = prompt_hint.strip_prefix("User has these modern tools installed: ")
+                && let Some(tools_only) = tools_part.strip_suffix("\nPrefer these when appropriate.\n")
+            {
+                println!("  {}", tools_only);
+            }
+        } else {
+            println!("  (only standard tools detected)");
+        }
+    }
+
+    println!("\nCache location: {}", ToolCache::cache_path().display());
+
+    Ok(())
+}
+
 /// Process a command and return result (for testing)
 pub async fn run_command(command: Option<&Commands>, config_path: Option<&PathBuf>) -> Result<()> {
     match command {
@@ -241,6 +333,7 @@ pub async fn run_command(command: Option<&Commands>, config_path: Option<&PathBu
             stats,
             clear,
         }) => handle_history(*limit, *patterns, *stats, *clear),
+        Some(Commands::Tools { refresh, clear }) => handle_tools(*refresh, *clear),
         None => {
             use clap::CommandFactory;
             let after_help = build_status_footer();
@@ -298,6 +391,12 @@ async fn main() -> Result<()> {
             clear,
         }) => {
             if let Err(e) = handle_history(*limit, *patterns, *stats, *clear) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Tools { refresh, clear }) => {
+            if let Err(e) = handle_tools(*refresh, *clear) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -752,6 +851,55 @@ mod tests {
             clear: false,
         };
         let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_tools_default() {
+        let cmd = Commands::Tools {
+            refresh: false,
+            clear: false,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_tools_refresh() {
+        let cmd = Commands::Tools {
+            refresh: true,
+            clear: false,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_tools_clear() {
+        let cmd = Commands::Tools {
+            refresh: false,
+            clear: true,
+        };
+        let result = run_command(Some(&cmd), None).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_tools_display() {
+        // Just verify the function runs without crashing
+        let result = handle_tools(false, false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_tools_clear() {
+        let result = handle_tools(false, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_tools_refresh() {
+        let result = handle_tools(true, false);
         assert!(result.is_ok());
     }
 }

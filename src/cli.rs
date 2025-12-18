@@ -95,6 +95,18 @@ pub enum Commands {
         #[arg(long)]
         clear: bool,
     },
+
+    /// Manage tool cache for command suggestions
+    #[command(name = "tools")]
+    Tools {
+        /// Refresh the tool cache by probing for common modern tools
+        #[arg(short, long)]
+        refresh: bool,
+
+        /// Clear the tool cache
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 /// Check if fzf is available and get its version
@@ -437,6 +449,53 @@ mod tests {
                 assert!(patterns);
             }
             _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_tools_default() {
+        let cli = Cli::try_parse_from(["qai", "tools"]).unwrap();
+        match cli.command {
+            Some(Commands::Tools { refresh, clear }) => {
+                assert!(!refresh);
+                assert!(!clear);
+            }
+            _ => panic!("Expected Tools command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_tools_refresh() {
+        let cli = Cli::try_parse_from(["qai", "tools", "--refresh"]).unwrap();
+        match cli.command {
+            Some(Commands::Tools { refresh, clear }) => {
+                assert!(refresh);
+                assert!(!clear);
+            }
+            _ => panic!("Expected Tools command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_tools_refresh_short() {
+        let cli = Cli::try_parse_from(["qai", "tools", "-r"]).unwrap();
+        match cli.command {
+            Some(Commands::Tools { refresh, .. }) => {
+                assert!(refresh);
+            }
+            _ => panic!("Expected Tools command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_tools_clear() {
+        let cli = Cli::try_parse_from(["qai", "tools", "--clear"]).unwrap();
+        match cli.command {
+            Some(Commands::Tools { refresh, clear }) => {
+                assert!(!refresh);
+                assert!(clear);
+            }
+            _ => panic!("Expected Tools command"),
         }
     }
 }
