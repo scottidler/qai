@@ -3,8 +3,13 @@
 /// This is printed to stdout when `qai shell-init zsh` is called.
 /// Users add `eval "$(qai shell-init zsh)"` to their .zshrc
 pub const ZSH_INIT_SCRIPT: &str = r#"
-# qai - Natural language to shell commands
+# qai - Natural language to shell commands via AI
 # Add to your .zshrc: eval "$(qai shell-init zsh)"
+
+# State variable: are we in AI mode?
+_qai_in_ai_mode=0
+_qai_saved_prompt=""
+_qai_ai_prompt="🤖 ai> "
 
 # Store original tab binding (parse the widget name from bindkey output)
 # bindkey '^I' outputs: "^I" widget-name
@@ -22,37 +27,135 @@ fi
 [[ -z "$_qai_original_tab_widget" ]] && _qai_original_tab_widget="expand-or-complete"
 unset _qai_tab_binding
 
-# QAI expansion function
-_qai_expand() {
-    # Only trigger if:
-    # 1. Line starts with "qai "
-    # 2. There is text beyond just "qai "
-    if [[ "$BUFFER" == qai\ * && ${#BUFFER} -gt 4 ]]; then
-        local query="${BUFFER#qai }"
-
-        # Call qai and capture output
-        local result
-        result=$(qai query "$query" 2>/dev/null)
-        local exit_code=$?
-
-        if [[ $exit_code -eq 0 && -n "$result" ]]; then
-            # Replace buffer with result
-            BUFFER="$result"
-            # Move cursor to end
-            CURSOR=${#BUFFER}
-        fi
-        # On error, leave buffer unchanged (error printed to stderr)
+# Tab key handler - dispatch based on buffer content and mode
+_qai_tab_handler() {
+    if [[ "$BUFFER" == "ai" && $_qai_in_ai_mode -eq 0 ]]; then
+        _qai_start
     else
-        # Not a qai command, use original tab behavior
+        # Normal tab completion
         zle "${_qai_original_tab_widget:-expand-or-complete}"
     fi
 }
 
-# Register the widget
-zle -N _qai_expand
+# Start AI mode session
+_qai_start() {
+    # Validate API key first (calls OpenAI /v1/models, no token usage)
+    local validation_result
+    validation_result=$(qai validate-api 2>&1)
+    local exit_code=$?
 
-# Bind to Tab
-bindkey '^I' _qai_expand
+    if [[ $exit_code -ne 0 ]]; then
+        zle -M "❌ $validation_result"
+        BUFFER=""
+        return 1
+    fi
+
+    # Enter AI mode
+    _qai_in_ai_mode=1
+    _qai_saved_prompt="$PROMPT"
+    PROMPT="$_qai_ai_prompt"
+    BUFFER=""
+    CURSOR=0
+    zle reset-prompt
+}
+
+# Exit AI mode session
+_qai_exit() {
+    if [[ $_qai_in_ai_mode -eq 1 ]]; then
+        _qai_in_ai_mode=0
+        PROMPT="$_qai_saved_prompt"
+        BUFFER=""
+        CURSOR=0
+        zle reset-prompt
+    fi
+}
+
+# Submit query in AI mode
+_qai_submit() {
+    if [[ $_qai_in_ai_mode -eq 1 ]]; then
+        local query="$BUFFER"
+
+        if [[ -z "$query" ]]; then
+            # Empty query, exit AI mode
+            _qai_exit
+            return
+        fi
+
+        # Show fetching indicator
+        zle -M "🔄 Fetching..."
+
+        local result
+        local exit_code
+
+        # Check if fzf is available
+        if command -v fzf >/dev/null 2>&1; then
+            # Get multiple results
+            result=$(qai query --multi "$query" 2>/dev/null)
+            exit_code=$?
+
+            if [[ $exit_code -eq 0 && -n "$result" ]]; then
+                # Use fzf to select
+                local selected
+                selected=$(echo "$result" | fzf --height=10 --reverse --prompt="Select command: ")
+
+                if [[ -n "$selected" ]]; then
+                    _qai_in_ai_mode=0
+                    PROMPT="$_qai_saved_prompt"
+                    BUFFER="$selected"
+                    CURSOR=${#BUFFER}
+                    zle reset-prompt
+                    zle -M ""
+                else
+                    # User cancelled fzf
+                    zle -M "Cancelled"
+                fi
+            else
+                zle -M "❌ No results"
+            fi
+        else
+            # No fzf, single result mode
+            result=$(qai query "$query" 2>/dev/null)
+            exit_code=$?
+
+            if [[ $exit_code -eq 0 && -n "$result" ]]; then
+                _qai_in_ai_mode=0
+                PROMPT="$_qai_saved_prompt"
+                BUFFER="$result"
+                CURSOR=${#BUFFER}
+                zle reset-prompt
+                zle -M ""
+            else
+                zle -M "❌ No results"
+            fi
+        fi
+    else
+        # Not in AI mode, normal enter (accept-line)
+        zle accept-line
+    fi
+}
+
+# Ctrl+C handler
+_qai_interrupt() {
+    if [[ $_qai_in_ai_mode -eq 1 ]]; then
+        _qai_exit
+    else
+        # Normal interrupt behavior
+        BUFFER=""
+        zle reset-prompt
+    fi
+}
+
+# Register widgets
+zle -N _qai_tab_handler
+zle -N _qai_start
+zle -N _qai_exit
+zle -N _qai_submit
+zle -N _qai_interrupt
+
+# Bind keys
+bindkey '^I' _qai_tab_handler  # Tab
+bindkey '^M' _qai_submit       # Enter
+bindkey '^C' _qai_interrupt    # Ctrl+C
 "#;
 
 /// Generate shell init script for the specified shell
@@ -74,37 +177,123 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_zsh_init_script_contains_required_elements() {
+    fn test_zsh_init_script_contains_ai_mode_state() {
         let script = ZSH_INIT_SCRIPT;
 
-        // Should contain the widget function
-        assert!(script.contains("_qai_expand()"));
+        // Must have AI mode state variable
+        assert!(script.contains("_qai_in_ai_mode=0"));
 
-        // Should store original tab binding
-        assert!(script.contains("_qai_original_tab_widget"));
+        // Must have AI mode prompt
+        assert!(script.contains("_qai_ai_prompt="));
+        assert!(script.contains("🤖"));
+    }
 
-        // Should register the widget
-        assert!(script.contains("zle -N _qai_expand"));
+    #[test]
+    fn test_zsh_init_script_tab_handler() {
+        let script = ZSH_INIT_SCRIPT;
 
-        // Should bind to Tab
-        assert!(script.contains("bindkey '^I' _qai_expand"));
+        // Must have tab handler function
+        assert!(script.contains("_qai_tab_handler()"));
 
-        // Should check for qai prefix
-        assert!(script.contains(r#""$BUFFER" == qai\ *"#));
+        // Tab handler checks for "ai" buffer
+        assert!(script.contains(r#""$BUFFER" == "ai""#));
 
-        // Should call qai query
-        assert!(script.contains("qai query"));
+        // Calls _qai_start when buffer is "ai"
+        assert!(script.contains("_qai_start"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_start_function() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Must have start function
+        assert!(script.contains("_qai_start()"));
+
+        // Validates API key before entering mode
+        assert!(script.contains("qai validate-api"));
+
+        // Sets AI mode flag
+        assert!(script.contains("_qai_in_ai_mode=1"));
+
+        // Saves and sets prompt
+        assert!(script.contains("_qai_saved_prompt"));
+        assert!(script.contains(r#"PROMPT="$_qai_ai_prompt""#));
+    }
+
+    #[test]
+    fn test_zsh_init_script_exit_function() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Must have exit function
+        assert!(script.contains("_qai_exit()"));
+
+        // Restores original prompt
+        assert!(script.contains(r#"PROMPT="$_qai_saved_prompt""#));
+
+        // Clears AI mode flag
+        assert!(script.contains("_qai_in_ai_mode=0"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_submit_function() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Must have submit function
+        assert!(script.contains("_qai_submit()"));
+
+        // Checks if in AI mode
+        assert!(script.contains(r#"$_qai_in_ai_mode -eq 1"#));
+
+        // Has fzf integration
+        assert!(script.contains("command -v fzf"));
+        assert!(script.contains("qai query --multi"));
+        assert!(script.contains("| fzf"));
+
+        // Has fallback for no fzf
+        assert!(script.contains("qai query \"$query\""));
+    }
+
+    #[test]
+    fn test_zsh_init_script_interrupt_handler() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Must have interrupt function
+        assert!(script.contains("_qai_interrupt()"));
+
+        // Calls exit when in AI mode
+        assert!(script.contains("_qai_exit"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_widget_registration() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // All widgets registered
+        assert!(script.contains("zle -N _qai_tab_handler"));
+        assert!(script.contains("zle -N _qai_start"));
+        assert!(script.contains("zle -N _qai_exit"));
+        assert!(script.contains("zle -N _qai_submit"));
+        assert!(script.contains("zle -N _qai_interrupt"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_key_bindings() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Key bindings
+        assert!(script.contains("bindkey '^I' _qai_tab_handler")); // Tab
+        assert!(script.contains("bindkey '^M' _qai_submit")); // Enter
+        assert!(script.contains("bindkey '^C' _qai_interrupt")); // Ctrl+C
     }
 
     #[test]
     fn test_zsh_init_script_fallback_to_original_tab() {
         let script = ZSH_INIT_SCRIPT;
 
-        // CRITICAL: Must fallback to original tab widget when NOT a qai command
-        // The else branch should call the original widget
+        // CRITICAL: Must fallback to original tab widget when NOT triggering AI mode
         assert!(
             script.contains(r#"zle "${_qai_original_tab_widget:-expand-or-complete}""#),
-            "Script must call original tab widget with fallback for non-qai commands"
+            "Script must call original tab widget with fallback for normal completion"
         );
 
         // Must properly parse bindkey output to get the widget name
@@ -113,7 +302,7 @@ mod tests {
             "Script must capture current tab binding"
         );
 
-        // Must extract widget name from bindkey output (format: "^I" widget-name)
+        // Must extract widget name from bindkey output
         assert!(
             script.contains(r#"${_qai_tab_binding##*\" }"#),
             "Script must extract widget name from bindkey output"
@@ -124,6 +313,34 @@ mod tests {
             script.contains(r#"_qai_original_tab_widget="expand-or-complete""#),
             "Script must have expand-or-complete as default fallback"
         );
+    }
+
+    #[test]
+    fn test_zsh_init_script_api_validation_error_handling() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Shows error message on validation failure
+        assert!(script.contains(r#"zle -M "❌ $validation_result""#));
+
+        // Clears buffer on failure
+        assert!(script.contains(r#"BUFFER="""#));
+    }
+
+    #[test]
+    fn test_zsh_init_script_shows_fetching_indicator() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // Shows fetching indicator when querying
+        assert!(script.contains("🔄 Fetching"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_fzf_options() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // fzf should have height and reverse for dropdown style
+        assert!(script.contains("--height"));
+        assert!(script.contains("--reverse"));
     }
 
     #[test]
@@ -158,5 +375,13 @@ mod tests {
         let shells = supported_shells();
         assert!(!shells.is_empty());
         assert!(shells.contains(&"zsh"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_normal_enter_outside_ai_mode() {
+        let script = ZSH_INIT_SCRIPT;
+
+        // When not in AI mode, Enter should do normal accept-line
+        assert!(script.contains("zle accept-line"));
     }
 }

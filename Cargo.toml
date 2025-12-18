@@ -27,3 +27,6 @@ serial_test = "3.2.0"
 tempfile = "3.23.0"
 wiremock = "0.6.5"
 # For build.rs if needed
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin_include)"] }

@@ -1,4 +1,5 @@
 use eyre::{Context, Result, eyre};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
@@ -42,6 +43,40 @@ struct ErrorDetail {
     message: String,
 }
 
+/// API validation error types
+#[derive(Debug)]
+pub enum ApiValidationError {
+    /// API key not configured
+    NotConfigured,
+    /// API key is invalid or revoked (401)
+    InvalidKey(String),
+    /// Access denied (403)
+    AccessDenied(String),
+    /// Network error
+    NetworkError(String),
+    /// Unexpected error
+    UnexpectedError(String),
+}
+
+impl std::fmt::Display for ApiValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiValidationError::NotConfigured => {
+                write!(
+                    f,
+                    "API key not configured. Set QAI_API_KEY environment variable or add to config."
+                )
+            }
+            ApiValidationError::InvalidKey(msg) => write!(f, "Invalid API key: {}", msg),
+            ApiValidationError::AccessDenied(msg) => write!(f, "Access denied: {}", msg),
+            ApiValidationError::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            ApiValidationError::UnexpectedError(msg) => write!(f, "Unexpected error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for ApiValidationError {}
+
 #[derive(Debug)]
 pub struct OpenAIClient {
     client: reqwest::Client,
@@ -84,7 +119,50 @@ impl OpenAIClient {
         })
     }
 
+    /// Validate API key by calling GET /v1/models
+    /// This endpoint authenticates but does NOT consume tokens
+    #[allow(dead_code)]
+    pub async fn validate_api_key(&self) -> std::result::Result<(), ApiValidationError> {
+        let url = format!("{}/models", self.api_base);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| ApiValidationError::NetworkError(e.to_string()))?;
+
+        match response.status() {
+            StatusCode::OK => Ok(()),
+            StatusCode::UNAUTHORIZED => Err(ApiValidationError::InvalidKey(
+                "API key is invalid or revoked".to_string(),
+            )),
+            StatusCode::FORBIDDEN => Err(ApiValidationError::AccessDenied(
+                "API key lacks required permissions".to_string(),
+            )),
+            status => Err(ApiValidationError::UnexpectedError(format!(
+                "Unexpected response: {}",
+                status
+            ))),
+        }
+    }
+
     pub async fn query(&self, system_prompt: &str, user_query: &str) -> Result<String> {
+        self.query_internal(system_prompt, user_query, false, 1).await
+    }
+
+    pub async fn query_multi(&self, system_prompt: &str, user_query: &str, count: usize) -> Result<String> {
+        self.query_internal(system_prompt, user_query, true, count).await
+    }
+
+    async fn query_internal(
+        &self,
+        system_prompt: &str,
+        user_query: &str,
+        _multi: bool,
+        _count: usize,
+    ) -> Result<String> {
         let url = format!("{}/chat/completions", self.api_base);
 
         let request = ChatRequest {
@@ -146,9 +224,43 @@ impl OpenAIClient {
     }
 }
 
+/// Validate API key using config
+pub async fn validate_api_key_from_config(config: &Config) -> std::result::Result<(), ApiValidationError> {
+    let api_key = config.get_api_key().ok_or(ApiValidationError::NotConfigured)?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| ApiValidationError::NetworkError(e.to_string()))?;
+
+    let url = format!("{}/models", config.api_base);
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| ApiValidationError::NetworkError(e.to_string()))?;
+
+    match response.status() {
+        StatusCode::OK => Ok(()),
+        StatusCode::UNAUTHORIZED => Err(ApiValidationError::InvalidKey(
+            "API key is invalid or revoked".to_string(),
+        )),
+        StatusCode::FORBIDDEN => Err(ApiValidationError::AccessDenied(
+            "API key lacks required permissions".to_string(),
+        )),
+        status => Err(ApiValidationError::UnexpectedError(format!(
+            "Unexpected response: {}",
+            status
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -307,8 +419,6 @@ mod tests {
         let client = OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o".to_string()).unwrap();
 
         let _ = client.query("system prompt", "user query").await;
-
-        // The mock expectation verifies the request was made
     }
 
     #[tokio::test]
@@ -332,7 +442,6 @@ mod tests {
 
     #[test]
     fn test_new_with_base_works() {
-        // Test the direct constructor that doesn't touch env vars
         let result = OpenAIClient::new_with_base(
             "test-key".to_string(),
             "https://api.example.com".to_string(),
@@ -353,5 +462,210 @@ mod tests {
         assert_eq!(client.api_key, "my-api-key");
         assert_eq!(client.api_base, "https://custom.api.com/v1");
         assert_eq!(client.model, "gpt-4o");
+    }
+
+    // API validation tests
+
+    #[tokio::test]
+    async fn test_validate_api_key_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(header("Authorization", "Bearer valid-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data": []}"#))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            OpenAIClient::new_with_base("valid-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+
+        let result = client.validate_api_key().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_unauthorized() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(401).set_body_string(r#"{"error": "unauthorized"}"#))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            OpenAIClient::new_with_base("invalid-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string())
+                .unwrap();
+
+        let result = client.validate_api_key().await;
+        assert!(matches!(result, Err(ApiValidationError::InvalidKey(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_forbidden() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(403).set_body_string(r#"{"error": "forbidden"}"#))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            OpenAIClient::new_with_base("limited-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string())
+                .unwrap();
+
+        let result = client.validate_api_key().await;
+        assert!(matches!(result, Err(ApiValidationError::AccessDenied(_))));
+    }
+
+    #[test]
+    fn test_api_validation_error_display() {
+        let err = ApiValidationError::NotConfigured;
+        assert!(err.to_string().contains("not configured"));
+
+        let err = ApiValidationError::InvalidKey("bad key".to_string());
+        assert!(err.to_string().contains("Invalid"));
+
+        let err = ApiValidationError::AccessDenied("no access".to_string());
+        assert!(err.to_string().contains("Access denied"));
+
+        let err = ApiValidationError::NetworkError("timeout".to_string());
+        assert!(err.to_string().contains("Network"));
+
+        let err = ApiValidationError::UnexpectedError("500".to_string());
+        assert!(err.to_string().contains("Unexpected"));
+    }
+
+    #[tokio::test]
+    async fn test_query_multi_works() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(create_success_response("ls -la\\nls -lh\\nls")))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+
+        let result = client.query_multi("system", "list files", 3).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_unexpected_status() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(500).set_body_string(r#"{"error": "server error"}"#))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+
+        let result = client.validate_api_key().await;
+        assert!(matches!(result, Err(ApiValidationError::UnexpectedError(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_from_config_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"data": []}"#))
+            .mount(&mock_server)
+            .await;
+
+        let config = Config {
+            api_key: Some("valid-key".to_string()),
+            api_base: mock_server.uri(),
+            model: "gpt-4o-mini".to_string(),
+            debug: false,
+        };
+
+        let result = validate_api_key_from_config(&config).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_from_config_not_configured() {
+        let config = Config {
+            api_key: None,
+            api_base: "https://api.openai.com/v1".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            debug: false,
+        };
+
+        let result = validate_api_key_from_config(&config).await;
+        assert!(matches!(result, Err(ApiValidationError::NotConfigured)));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_from_config_unauthorized() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(401).set_body_string(r#"{"error": "unauthorized"}"#))
+            .mount(&mock_server)
+            .await;
+
+        let config = Config {
+            api_key: Some("invalid-key".to_string()),
+            api_base: mock_server.uri(),
+            model: "gpt-4o-mini".to_string(),
+            debug: false,
+        };
+
+        let result = validate_api_key_from_config(&config).await;
+        assert!(matches!(result, Err(ApiValidationError::InvalidKey(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_from_config_forbidden() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(403).set_body_string(r#"{"error": "forbidden"}"#))
+            .mount(&mock_server)
+            .await;
+
+        let config = Config {
+            api_key: Some("limited-key".to_string()),
+            api_base: mock_server.uri(),
+            model: "gpt-4o-mini".to_string(),
+            debug: false,
+        };
+
+        let result = validate_api_key_from_config(&config).await;
+        assert!(matches!(result, Err(ApiValidationError::AccessDenied(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_from_config_unexpected_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(502).set_body_string(r#"Bad Gateway"#))
+            .mount(&mock_server)
+            .await;
+
+        let config = Config {
+            api_key: Some("key".to_string()),
+            api_base: mock_server.uri(),
+            model: "gpt-4o-mini".to_string(),
+            debug: false,
+        };
+
+        let result = validate_api_key_from_config(&config).await;
+        assert!(matches!(result, Err(ApiValidationError::UnexpectedError(_))));
     }
 }
