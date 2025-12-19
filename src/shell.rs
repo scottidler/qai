@@ -136,11 +136,11 @@ _qai_submit() {
 
 # TRAPINT handles Ctrl+C at signal level (the ONLY reliable way in zsh)
 # This fires BEFORE any widget, so we can intercept cleanly
+# NOTE: Cannot modify BUFFER here - it's read-only in signal trap context
 TRAPINT() {
     if [[ $_qai_in_ai_mode -eq 1 ]]; then
         _qai_in_ai_mode=0
         PROMPT="$_qai_saved_prompt"
-        BUFFER=""
         print ""  # newline
         zle && zle reset-prompt
         return 128  # indicate interrupt was handled, don't propagate

@@ -41,14 +41,7 @@ tasks:
   lint:
     help: "Run whitespace linting"
     bash: |
-      #!/bin/bash
-      set -e
-      if git grep -n '[[:space:]]$' -- '*.rs' '*.yml' '*.yaml' '*.toml' '*.md' 2>/dev/null; then
-        echo "❌ Found trailing whitespace"
-        exit 1
-      else
-        echo "✅ No trailing whitespace found"
-      fi
+      whitespace -r
 
   # Run tests without coverage
   test:
