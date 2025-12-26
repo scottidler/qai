@@ -3,8 +3,26 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Bindings configuration
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct BindingsConfig {
+    /// Key to trigger AI mode (when buffer is "ai")
+    /// Examples: "tab", "ctrl-space", "ctrl-a", "f1"
+    pub trigger: String,
+}
+
+impl Default for BindingsConfig {
+    fn default() -> Self {
+        Self {
+            trigger: "tab".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
+#[serde(rename_all = "kebab-case")]
 pub struct Config {
     /// OpenAI API key (can also be set via QAI_API_KEY env var)
     pub api_key: Option<String>,
@@ -14,6 +32,9 @@ pub struct Config {
     pub api_base: String,
     /// Enable debug mode
     pub debug: bool,
+    /// Bindings configuration
+    #[serde(default)]
+    pub bindings: BindingsConfig,
 }
 
 impl Default for Config {
@@ -23,6 +44,7 @@ impl Default for Config {
             model: "gpt-4o-mini".to_string(),
             api_base: "https://api.openai.com/v1".to_string(),
             debug: false,
+            bindings: BindingsConfig::default(),
         }
     }
 }
@@ -113,6 +135,7 @@ mod tests {
         assert_eq!(config.api_base, "https://api.openai.com/v1");
         assert!(!config.debug);
         assert!(config.api_key.is_none());
+        assert_eq!(config.bindings.trigger, "tab");
     }
 
     #[test]
@@ -121,10 +144,12 @@ mod tests {
         writeln!(
             file,
             r#"
-api_key: test-key-123
+api-key: test-key-123
 model: gpt-4o
-api_base: https://custom.api.com/v1
+api-base: https://custom.api.com/v1
 debug: true
+bindings:
+  trigger: ctrl-space
 "#
         )
         .unwrap();
@@ -134,6 +159,7 @@ debug: true
         assert_eq!(config.model, "gpt-4o");
         assert_eq!(config.api_base, "https://custom.api.com/v1");
         assert!(config.debug);
+        assert_eq!(config.bindings.trigger, "ctrl-space");
     }
 
     #[test]
@@ -220,13 +246,18 @@ model: custom-model
             model: "test-model".to_string(),
             api_base: "https://test.api.com".to_string(),
             debug: true,
+            bindings: BindingsConfig {
+                trigger: "ctrl-space".to_string(),
+            },
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();
-        assert!(yaml.contains("api_key: test-key"));
+        assert!(yaml.contains("api-key: test-key"));
         assert!(yaml.contains("model: test-model"));
-        assert!(yaml.contains("api_base: https://test.api.com"));
+        assert!(yaml.contains("api-base: https://test.api.com"));
         assert!(yaml.contains("debug: true"));
+        assert!(yaml.contains("bindings:"));
+        assert!(yaml.contains("trigger: ctrl-space"));
     }
 
     #[test]
@@ -262,10 +293,12 @@ model: custom-model
         writeln!(
             file,
             r#"
-api_key: my-key
+api-key: my-key
 model: gpt-4
-api_base: https://my.api.com
+api-base: https://my.api.com
 debug: true
+bindings:
+  trigger: f1
 "#
         )
         .unwrap();
@@ -275,6 +308,7 @@ debug: true
         assert_eq!(config.model, "gpt-4");
         assert_eq!(config.api_base, "https://my.api.com");
         assert!(config.debug);
+        assert_eq!(config.bindings.trigger, "f1");
     }
 
     #[test]
@@ -293,7 +327,7 @@ debug: true
     #[test]
     fn test_config_api_key_can_be_null() {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "api_key: null").unwrap();
+        writeln!(file, "api-key: null").unwrap();
         let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
         assert!(config.api_key.is_none());
     }
@@ -304,5 +338,35 @@ debug: true
         writeln!(file, "model: \"  gpt-4  \"").unwrap();
         let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
         assert_eq!(config.model, "  gpt-4  ");
+    }
+
+    #[test]
+    fn test_bindings_default() {
+        let bindings = BindingsConfig::default();
+        assert_eq!(bindings.trigger, "tab");
+    }
+
+    #[test]
+    fn test_config_bindings_defaults_when_not_specified() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "model: gpt-4o").unwrap();
+        let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
+        // bindings should use defaults when not specified
+        assert_eq!(config.bindings.trigger, "tab");
+    }
+
+    #[test]
+    fn test_config_bindings_custom_trigger() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+bindings:
+  trigger: ctrl-space
+"#
+        )
+        .unwrap();
+        let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
+        assert_eq!(config.bindings.trigger, "ctrl-space");
     }
 }

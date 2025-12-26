@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 mod api;
+mod bindings;
 mod cli;
 mod config;
 mod history;
@@ -96,12 +97,13 @@ Environment:
     ))
 }
 
-fn handle_shell_init(shell: &str) -> Result<()> {
-    match generate_init_script(shell) {
-        Some(script) => {
+fn handle_shell_init(shell: &str, config: &Config) -> Result<()> {
+    match generate_init_script(shell, config) {
+        Some(Ok(script)) => {
             print!("{}", script);
             Ok(())
         }
+        Some(Err(e)) => Err(eyre::eyre!("Invalid keybinding configuration: {}", e)),
         None => {
             let supported = shell::supported_shells().join(", ");
             Err(eyre::eyre!(
@@ -322,7 +324,10 @@ pub async fn run_command(command: Option<&Commands>, config_path: Option<&PathBu
             let query_str = join_query(query);
             handle_query(&query_str, &config, *multi, *count).await
         }
-        Some(Commands::ShellInit { shell }) => handle_shell_init(shell),
+        Some(Commands::ShellInit { shell }) => {
+            let config = Config::load(config_path).context("Failed to load configuration")?;
+            handle_shell_init(shell, &config)
+        }
         Some(Commands::ValidateApi) => {
             let config = Config::load(config_path).context("Failed to load configuration")?;
             handle_validate_api(&config).await
@@ -372,7 +377,8 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::ShellInit { shell }) => {
-            if let Err(e) = handle_shell_init(shell) {
+            let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
+            if let Err(e) = handle_shell_init(shell, &config) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -437,13 +443,15 @@ mod tests {
 
     #[test]
     fn test_handle_shell_init_zsh() {
-        let result = handle_shell_init("zsh");
+        let config = Config::default();
+        let result = handle_shell_init("zsh", &config);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_handle_shell_init_unsupported() {
-        let result = handle_shell_init("fish");
+        let config = Config::default();
+        let result = handle_shell_init("fish", &config);
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
         assert!(error.contains("Unsupported shell"));
@@ -452,9 +460,36 @@ mod tests {
 
     #[test]
     fn test_handle_shell_init_error_lists_supported() {
-        let result = handle_shell_init("invalid");
+        let config = Config::default();
+        let result = handle_shell_init("invalid", &config);
         let error = result.unwrap_err().to_string();
         assert!(error.contains("zsh"));
+    }
+
+    #[test]
+    fn test_handle_shell_init_with_custom_keybinding() {
+        let config = Config {
+            bindings: config::BindingsConfig {
+                trigger: "ctrl-space".to_string(),
+            },
+            ..Default::default()
+        };
+        let result = handle_shell_init("zsh", &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_shell_init_with_invalid_keybinding() {
+        let config = Config {
+            bindings: config::BindingsConfig {
+                trigger: "invalid-key".to_string(),
+            },
+            ..Default::default()
+        };
+        let result = handle_shell_init("zsh", &config);
+        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("Invalid keybinding configuration"));
     }
 
     #[tokio::test]
@@ -472,6 +507,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_query("list files", &config, false, 1).await;
@@ -493,6 +529,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_query("list files", &config, true, 3).await;
@@ -514,6 +551,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_query("test query", &config, false, 1).await;
@@ -598,7 +636,7 @@ mod tests {
         use std::io::Write;
         writeln!(
             config_file,
-            "api_key: test-key\napi_base: {}\nmodel: gpt-4o-mini",
+            "api-key: test-key\napi-base: {}\nmodel: gpt-4o-mini",
             mock_server.uri()
         )
         .unwrap();
@@ -629,7 +667,7 @@ mod tests {
         use std::io::Write;
         writeln!(
             config_file,
-            "api_key: test-key\napi_base: {}\nmodel: gpt-4o-mini",
+            "api-key: test-key\napi-base: {}\nmodel: gpt-4o-mini",
             mock_server.uri()
         )
         .unwrap();
@@ -658,7 +696,7 @@ mod tests {
         use std::io::Write;
         writeln!(
             config_file,
-            "api_key: test-key\napi_base: {}\nmodel: gpt-4o-mini",
+            "api-key: test-key\napi-base: {}\nmodel: gpt-4o-mini",
             mock_server.uri()
         )
         .unwrap();
@@ -707,6 +745,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_validate_api(&config).await;
@@ -730,6 +769,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_validate_api(&config).await;
@@ -753,6 +793,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = handle_validate_api(&config).await;

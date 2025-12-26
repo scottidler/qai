@@ -2,13 +2,31 @@
 # Primary location: ~/.config/qai/qai.yml
 
 # OpenAI API key (can also use QAI_API_KEY environment variable)
-# api_key: "sk-your-key-here"
+# api-key: "sk-your-key-here"
 
 # Model to use (default: gpt-4o-mini)
 model: "gpt-4o-mini"
 
 # API base URL (default: https://api.openai.com/v1)
-api_base: "https://api.openai.com/v1"
+api-base: "https://api.openai.com/v1"
 
 # Enable debug mode
 debug: false
+
+# Bindings configuration
+# Configure which key triggers AI mode when you type "ai" and press the trigger key
+bindings:
+  # Key to trigger AI mode (default: tab)
+  # Common alternatives if tab conflicts with other plugins:
+  #   - ctrl-space  (recommended alternative)
+  #   - ctrl-g      (often unused)
+  #   - ctrl-]      (rarely used)
+  #   - f1          (function key)
+  #
+  # Full list of supported keys:
+  #   tab, enter, return, escape, esc, backspace
+  #   ctrl-a through ctrl-z, ctrl-space
+  #   f1 through f12
+  #   up, down, left, right
+  #   home, end, insert, delete, page-up, page-down
+  trigger: "tab"

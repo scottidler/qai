@@ -1,44 +1,57 @@
-/// ZSH integration script
+//! Shell integration scripts
+//!
+//! This module provides shell init scripts that are printed to stdout when
+//! `qai shell-init <shell>` is called. Users add `eval "$(qai shell-init zsh)"`
+//! to their shell config.
+
+use crate::bindings::key_name_to_sequence;
+use crate::config::Config;
+
+/// Generate ZSH init script with configurable trigger key
 ///
-/// This is printed to stdout when `qai shell-init zsh` is called.
-/// Users add `eval "$(qai shell-init zsh)"` to their .zshrc
-pub const ZSH_INIT_SCRIPT: &str = r#"
+/// The trigger key is read from the config and converted to a zsh bindkey sequence.
+pub fn generate_zsh_init_script(config: &Config) -> Result<String, String> {
+    let trigger_sequence = key_name_to_sequence(&config.bindings.trigger)?;
+
+    Ok(format!(
+        r#"
 # qai - Natural language to shell commands via AI
 # Add to your .zshrc: eval "$(qai shell-init zsh)"
+# Trigger key: {trigger_name} ({trigger_seq})
 
 # State variable: are we in AI mode?
 _qai_in_ai_mode=0
 _qai_saved_prompt=""
 _qai_ai_prompt="🤖 ai> "
 
-# Store original tab binding (parse the widget name from bindkey output)
-# bindkey '^I' outputs: "^I" widget-name
+# Store original binding for trigger key (parse the widget name from bindkey output)
+# bindkey '{trigger_seq}' outputs: "{trigger_seq}" widget-name
 # We extract the widget name using parameter expansion
-_qai_original_tab_widget=""
-if (( ${+widgets[expand-or-complete]} )); then
-    _qai_original_tab_widget="expand-or-complete"
+_qai_original_trigger_widget=""
+if (( ${{+widgets[expand-or-complete]}} )); then
+    _qai_original_trigger_widget="expand-or-complete"
 fi
 # Try to get actual current binding
-_qai_tab_binding="$(bindkey '^I' 2>/dev/null)"
-if [[ "$_qai_tab_binding" == *'" '* ]]; then
-    _qai_original_tab_widget="${_qai_tab_binding##*\" }"
+_qai_trigger_binding="$(bindkey '{trigger_seq}' 2>/dev/null)"
+if [[ "$_qai_trigger_binding" == *'" '* ]]; then
+    _qai_original_trigger_widget="${{_qai_trigger_binding##*\" }}"
 fi
 # Fallback to expand-or-complete if nothing found
-[[ -z "$_qai_original_tab_widget" ]] && _qai_original_tab_widget="expand-or-complete"
-unset _qai_tab_binding
+[[ -z "$_qai_original_trigger_widget" ]] && _qai_original_trigger_widget="expand-or-complete"
+unset _qai_trigger_binding
 
-# Tab key handler - dispatch based on buffer content and mode
-_qai_tab_handler() {
+# Trigger key handler - dispatch based on buffer content and mode
+_qai_trigger_handler() {{
     if [[ "$BUFFER" == "ai" && $_qai_in_ai_mode -eq 0 ]]; then
         _qai_start
     else
-        # Normal tab completion
-        zle "${_qai_original_tab_widget:-expand-or-complete}"
+        # Normal completion/action for this key
+        zle "${{_qai_original_trigger_widget:-expand-or-complete}}"
     fi
-}
+}}
 
 # Start AI mode session
-_qai_start() {
+_qai_start() {{
     # Validate API key first (calls OpenAI /v1/models, no token usage)
     local validation_result
     validation_result=$(qai validate-api 2>&1)
@@ -57,10 +70,10 @@ _qai_start() {
     BUFFER=""
     CURSOR=0
     zle reset-prompt
-}
+}}
 
 # Exit AI mode session
-_qai_exit() {
+_qai_exit() {{
     if [[ $_qai_in_ai_mode -eq 1 ]]; then
         _qai_in_ai_mode=0
         PROMPT="$_qai_saved_prompt"
@@ -68,10 +81,10 @@ _qai_exit() {
         CURSOR=0
         zle reset-prompt
     fi
-}
+}}
 
 # Submit query in AI mode
-_qai_submit() {
+_qai_submit() {{
     if [[ $_qai_in_ai_mode -eq 1 ]]; then
         local query="$BUFFER"
 
@@ -102,7 +115,7 @@ _qai_submit() {
                     _qai_in_ai_mode=0
                     PROMPT="$_qai_saved_prompt"
                     BUFFER="$selected"
-                    CURSOR=${#BUFFER}
+                    CURSOR=${{#BUFFER}}
                     zle reset-prompt
                     zle -M ""
                 else
@@ -121,7 +134,7 @@ _qai_submit() {
                 _qai_in_ai_mode=0
                 PROMPT="$_qai_saved_prompt"
                 BUFFER="$result"
-                CURSOR=${#BUFFER}
+                CURSOR=${{#BUFFER}}
                 zle reset-prompt
                 zle -M ""
             else
@@ -132,12 +145,12 @@ _qai_submit() {
         # Not in AI mode, normal enter (accept-line)
         zle accept-line
     fi
-}
+}}
 
 # TRAPINT handles Ctrl+C at signal level (the ONLY reliable way in zsh)
 # This fires BEFORE any widget, so we can intercept cleanly
 # NOTE: Cannot modify BUFFER here - it's read-only in signal trap context
-TRAPINT() {
+TRAPINT() {{
     if [[ $_qai_in_ai_mode -eq 1 ]]; then
         _qai_in_ai_mode=0
         PROMPT="$_qai_saved_prompt"
@@ -147,26 +160,39 @@ TRAPINT() {
     fi
     # Not in AI mode - let default SIGINT behavior happen
     return $((128 + $1))
-}
+}}
 
 # Register widgets
-zle -N _qai_tab_handler
+zle -N _qai_trigger_handler
 zle -N _qai_start
 zle -N _qai_exit
 zle -N _qai_submit
 
-# Bind keys - ONLY Tab and Enter need custom handling
-# Tab: triggers AI mode when buffer is "ai", otherwise normal completion
+# Bind keys
+# Trigger: activates AI mode when buffer is "ai", otherwise falls through to original binding
+bindkey '{trigger_seq}' _qai_trigger_handler
 # Enter: submits query in AI mode, otherwise normal accept-line
-bindkey '^I' _qai_tab_handler  # Tab
-bindkey '^M' _qai_submit       # Enter
+bindkey '^M' _qai_submit
 # Ctrl+C is handled by TRAPINT above (signal level, not bindkey)
-"#;
+"#,
+        trigger_name = config.bindings.trigger,
+        trigger_seq = trigger_sequence
+    ))
+}
 
 /// Generate shell init script for the specified shell
-pub fn generate_init_script(shell: &str) -> Option<&'static str> {
+///
+/// # Arguments
+/// * `shell` - Shell name (e.g., "zsh")
+/// * `config` - Configuration containing bindings
+///
+/// # Returns
+/// * `Some(Ok(script))` - Successfully generated script
+/// * `Some(Err(msg))` - Invalid configuration (e.g., unknown key name)
+/// * `None` - Unsupported shell
+pub fn generate_init_script(shell: &str, config: &Config) -> Option<Result<String, String>> {
     match shell.to_lowercase().as_str() {
-        "zsh" => Some(ZSH_INIT_SCRIPT),
+        "zsh" => Some(generate_zsh_init_script(config)),
         // Future: add bash, fish support
         _ => None,
     }
@@ -180,10 +206,24 @@ pub fn supported_shells() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BindingsConfig;
+
+    fn default_config() -> Config {
+        Config::default()
+    }
+
+    fn config_with_trigger(trigger: &str) -> Config {
+        Config {
+            bindings: BindingsConfig {
+                trigger: trigger.to_string(),
+            },
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn test_zsh_init_script_contains_ai_mode_state() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Must have AI mode state variable
         assert!(script.contains("_qai_in_ai_mode=0"));
@@ -194,13 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn test_zsh_init_script_tab_handler() {
-        let script = ZSH_INIT_SCRIPT;
+    fn test_zsh_init_script_trigger_handler() {
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
-        // Must have tab handler function
-        assert!(script.contains("_qai_tab_handler()"));
+        // Must have trigger handler function
+        assert!(script.contains("_qai_trigger_handler()"));
 
-        // Tab handler checks for "ai" buffer
+        // Trigger handler checks for "ai" buffer
         assert!(script.contains(r#""$BUFFER" == "ai""#));
 
         // Calls _qai_start when buffer is "ai"
@@ -209,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_start_function() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Must have start function
         assert!(script.contains("_qai_start()"));
@@ -227,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_exit_function() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Must have exit function
         assert!(script.contains("_qai_exit()"));
@@ -241,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_submit_function() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Must have submit function
         assert!(script.contains("_qai_submit()"));
@@ -260,28 +300,67 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_widget_registration() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Core widgets registered
-        assert!(script.contains("zle -N _qai_tab_handler"));
+        assert!(script.contains("zle -N _qai_trigger_handler"));
         assert!(script.contains("zle -N _qai_start"));
         assert!(script.contains("zle -N _qai_exit"));
         assert!(script.contains("zle -N _qai_submit"));
     }
 
     #[test]
-    fn test_zsh_init_script_key_bindings() {
-        let script = ZSH_INIT_SCRIPT;
+    fn test_zsh_init_script_default_tab_binding() {
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
-        // Only Tab and Enter are bound - minimal footprint
-        assert!(script.contains("bindkey '^I' _qai_tab_handler")); // Tab
+        // Default is Tab (^I)
+        assert!(script.contains("bindkey '^I' _qai_trigger_handler"));
         assert!(script.contains("bindkey '^M' _qai_submit")); // Enter
-        // Ctrl+C handled by TRAPINT, not bindkey
+    }
+
+    #[test]
+    fn test_zsh_init_script_custom_ctrl_space_binding() {
+        let config = config_with_trigger("ctrl-space");
+        let script = generate_zsh_init_script(&config).unwrap();
+
+        // Should use ^@ for ctrl-space
+        assert!(script.contains("bindkey '^@' _qai_trigger_handler"));
+        // Enter should still be ^M
+        assert!(script.contains("bindkey '^M' _qai_submit"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_custom_f1_binding() {
+        let config = config_with_trigger("f1");
+        let script = generate_zsh_init_script(&config).unwrap();
+
+        // Should use F1 escape sequence
+        assert!(script.contains("bindkey '^[OP' _qai_trigger_handler"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_custom_ctrl_g_binding() {
+        let config = config_with_trigger("ctrl-g");
+        let script = generate_zsh_init_script(&config).unwrap();
+
+        // Should use ^G for ctrl-g
+        assert!(script.contains("bindkey '^G' _qai_trigger_handler"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_invalid_key_returns_error() {
+        let config = config_with_trigger("invalid-key");
+        let result = generate_zsh_init_script(&config);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Unknown key 'invalid-key'"));
+        assert!(err.contains("Valid keys:"));
     }
 
     #[test]
     fn test_zsh_init_script_trapint_handler() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // TRAPINT handles Ctrl+C at signal level (only reliable way)
         assert!(script.contains("TRAPINT()"));
@@ -291,37 +370,25 @@ mod tests {
     }
 
     #[test]
-    fn test_zsh_init_script_fallback_to_original_tab() {
-        let script = ZSH_INIT_SCRIPT;
+    fn test_zsh_init_script_fallback_to_original_trigger() {
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
-        // CRITICAL: Must fallback to original tab widget when NOT triggering AI mode
+        // CRITICAL: Must fallback to original widget when NOT triggering AI mode
         assert!(
-            script.contains(r#"zle "${_qai_original_tab_widget:-expand-or-complete}""#),
-            "Script must call original tab widget with fallback for normal completion"
-        );
-
-        // Must properly parse bindkey output to get the widget name
-        assert!(
-            script.contains(r#"_qai_tab_binding="$(bindkey '^I' 2>/dev/null)""#),
-            "Script must capture current tab binding"
-        );
-
-        // Must extract widget name from bindkey output
-        assert!(
-            script.contains(r#"${_qai_tab_binding##*\" }"#),
-            "Script must extract widget name from bindkey output"
+            script.contains(r#"zle "${_qai_original_trigger_widget:-expand-or-complete}""#),
+            "Script must call original trigger widget with fallback for normal completion"
         );
 
         // Must have a fallback to expand-or-complete
         assert!(
-            script.contains(r#"_qai_original_tab_widget="expand-or-complete""#),
+            script.contains(r#"_qai_original_trigger_widget="expand-or-complete""#),
             "Script must have expand-or-complete as default fallback"
         );
     }
 
     #[test]
     fn test_zsh_init_script_api_validation_error_handling() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Shows error message on validation failure
         assert!(script.contains(r#"zle -M "❌ $validation_result""#));
@@ -332,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_shows_fetching_indicator() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // Shows fetching indicator when querying
         assert!(script.contains("🔄 Fetching"));
@@ -340,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_fzf_options() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // fzf should have height and reverse for dropdown style
         assert!(script.contains("--height"));
@@ -349,29 +416,39 @@ mod tests {
 
     #[test]
     fn test_generate_init_script_zsh() {
-        let script = generate_init_script("zsh");
-        assert!(script.is_some());
-        assert_eq!(script.unwrap(), ZSH_INIT_SCRIPT);
+        let result = generate_init_script("zsh", &default_config());
+        assert!(result.is_some());
+        assert!(result.unwrap().is_ok());
     }
 
     #[test]
     fn test_generate_init_script_zsh_uppercase() {
-        let script = generate_init_script("ZSH");
-        assert!(script.is_some());
+        let result = generate_init_script("ZSH", &default_config());
+        assert!(result.is_some());
+        assert!(result.unwrap().is_ok());
     }
 
     #[test]
     fn test_generate_init_script_zsh_mixed_case() {
-        let script = generate_init_script("Zsh");
-        assert!(script.is_some());
+        let result = generate_init_script("Zsh", &default_config());
+        assert!(result.is_some());
+        assert!(result.unwrap().is_ok());
     }
 
     #[test]
     fn test_generate_init_script_unsupported() {
-        assert!(generate_init_script("bash").is_none());
-        assert!(generate_init_script("fish").is_none());
-        assert!(generate_init_script("").is_none());
-        assert!(generate_init_script("invalid").is_none());
+        assert!(generate_init_script("bash", &default_config()).is_none());
+        assert!(generate_init_script("fish", &default_config()).is_none());
+        assert!(generate_init_script("", &default_config()).is_none());
+        assert!(generate_init_script("invalid", &default_config()).is_none());
+    }
+
+    #[test]
+    fn test_generate_init_script_with_invalid_key() {
+        let config = config_with_trigger("not-a-key");
+        let result = generate_init_script("zsh", &config);
+        assert!(result.is_some());
+        assert!(result.unwrap().is_err());
     }
 
     #[test]
@@ -383,9 +460,26 @@ mod tests {
 
     #[test]
     fn test_zsh_init_script_normal_enter_outside_ai_mode() {
-        let script = ZSH_INIT_SCRIPT;
+        let script = generate_zsh_init_script(&default_config()).unwrap();
 
         // When not in AI mode, Enter should do normal accept-line
         assert!(script.contains("zle accept-line"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_shows_trigger_key_in_comment() {
+        let config = config_with_trigger("ctrl-space");
+        let script = generate_zsh_init_script(&config).unwrap();
+
+        // Script should document the configured trigger key
+        assert!(script.contains("Trigger key: ctrl-space"));
+    }
+
+    #[test]
+    fn test_zsh_init_script_case_insensitive_key() {
+        // Test that "TAB" works same as "tab"
+        let config = config_with_trigger("TAB");
+        let script = generate_zsh_init_script(&config).unwrap();
+        assert!(script.contains("bindkey '^I' _qai_trigger_handler"));
     }
 }

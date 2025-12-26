@@ -587,6 +587,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = validate_api_key_from_config(&config).await;
@@ -608,6 +609,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = validate_api_key_from_config(&config).await;
@@ -629,6 +631,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = validate_api_key_from_config(&config).await;
@@ -650,6 +653,7 @@ mod tests {
             api_base: mock_server.uri(),
             model: "gpt-4o-mini".to_string(),
             debug: false,
+            ..Default::default()
         };
 
         let result = validate_api_key_from_config(&config).await;
