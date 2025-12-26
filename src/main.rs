@@ -103,7 +103,7 @@ fn handle_shell_init(shell: &str, config: &Config) -> Result<()> {
             print!("{}", script);
             Ok(())
         }
-        Some(Err(e)) => Err(eyre::eyre!("Invalid keybinding configuration: {}", e)),
+        Some(Err(e)) => Err(eyre::eyre!("Invalid bindings configuration: {}", e)),
         None => {
             let supported = shell::supported_shells().join(", ");
             Err(eyre::eyre!(
@@ -471,6 +471,7 @@ mod tests {
         let config = Config {
             bindings: config::BindingsConfig {
                 trigger: "ctrl-space".to_string(),
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -483,13 +484,14 @@ mod tests {
         let config = Config {
             bindings: config::BindingsConfig {
                 trigger: "invalid-key".to_string(),
+                ..Default::default()
             },
             ..Default::default()
         };
         let result = handle_shell_init("zsh", &config);
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
-        assert!(error.contains("Invalid keybinding configuration"));
+        assert!(error.contains("Invalid bindings configuration"));
     }
 
     #[tokio::test]

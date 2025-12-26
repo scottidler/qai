@@ -14,7 +14,7 @@ api-base: "https://api.openai.com/v1"
 debug: false
 
 # Bindings configuration
-# Configure which key triggers AI mode when you type "ai" and press the trigger key
+# Configure keybindings for AI mode
 bindings:
   # Key to trigger AI mode (default: tab)
   # Common alternatives if tab conflicts with other plugins:
@@ -22,11 +22,14 @@ bindings:
   #   - ctrl-g      (often unused)
   #   - ctrl-]      (rarely used)
   #   - f1          (function key)
-  #
+  trigger: tab
+
+  # Key to submit query to LLM when in AI mode (default: enter)
+  submit: enter
+
   # Full list of supported keys:
   #   tab, enter, return, escape, esc, backspace
   #   ctrl-a through ctrl-z, ctrl-space
   #   f1 through f12
   #   up, down, left, right
   #   home, end, insert, delete, page-up, page-down
-  trigger: "tab"

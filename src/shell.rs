@@ -7,17 +7,19 @@
 use crate::bindings::key_name_to_sequence;
 use crate::config::Config;
 
-/// Generate ZSH init script with configurable trigger key
+/// Generate ZSH init script with configurable trigger and submit keys
 ///
-/// The trigger key is read from the config and converted to a zsh bindkey sequence.
+/// The trigger and submit keys are read from the config and converted to zsh bindkey sequences.
 pub fn generate_zsh_init_script(config: &Config) -> Result<String, String> {
     let trigger_sequence = key_name_to_sequence(&config.bindings.trigger)?;
+    let submit_sequence = key_name_to_sequence(&config.bindings.submit)?;
 
     Ok(format!(
         r#"
 # qai - Natural language to shell commands via AI
 # Add to your .zshrc: eval "$(qai shell-init zsh)"
 # Trigger key: {trigger_name} ({trigger_seq})
+# Submit key: {submit_name} ({submit_seq})
 
 # State variable: are we in AI mode?
 _qai_in_ai_mode=0
@@ -171,12 +173,14 @@ zle -N _qai_submit
 # Bind keys
 # Trigger: activates AI mode when buffer is "ai", otherwise falls through to original binding
 bindkey '{trigger_seq}' _qai_trigger_handler
-# Enter: submits query in AI mode, otherwise normal accept-line
-bindkey '^M' _qai_submit
+# Submit: submits query in AI mode, otherwise normal accept-line
+bindkey '{submit_seq}' _qai_submit
 # Ctrl+C is handled by TRAPINT above (signal level, not bindkey)
 "#,
         trigger_name = config.bindings.trigger,
-        trigger_seq = trigger_sequence
+        trigger_seq = trigger_sequence,
+        submit_name = config.bindings.submit,
+        submit_seq = submit_sequence
     ))
 }
 
@@ -216,6 +220,7 @@ mod tests {
         Config {
             bindings: BindingsConfig {
                 trigger: trigger.to_string(),
+                ..Default::default()
             },
             ..Default::default()
         }

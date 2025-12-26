@@ -10,12 +10,16 @@ pub struct BindingsConfig {
     /// Key to trigger AI mode (when buffer is "ai")
     /// Examples: "tab", "ctrl-space", "ctrl-a", "f1"
     pub trigger: String,
+    /// Key to submit query to LLM (in AI mode)
+    /// Examples: "enter", "ctrl-m"
+    pub submit: String,
 }
 
 impl Default for BindingsConfig {
     fn default() -> Self {
         Self {
             trigger: "tab".to_string(),
+            submit: "enter".to_string(),
         }
     }
 }
@@ -248,6 +252,7 @@ model: custom-model
             debug: true,
             bindings: BindingsConfig {
                 trigger: "ctrl-space".to_string(),
+                ..Default::default()
             },
         };
 
