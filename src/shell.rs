@@ -30,16 +30,17 @@ _qai_ai_prompt="🤖 ai> "
 # bindkey '{trigger_seq}' outputs: "{trigger_seq}" widget-name
 # We extract the widget name using parameter expansion
 _qai_original_trigger_widget=""
-if (( ${{+widgets[expand-or-complete]}} )); then
-    _qai_original_trigger_widget="expand-or-complete"
+if (( ${{+widgets[.expand-or-complete]}} )); then
+    _qai_original_trigger_widget=".expand-or-complete"
 fi
 # Try to get actual current binding
 _qai_trigger_binding="$(bindkey '{trigger_seq}' 2>/dev/null)"
 if [[ "$_qai_trigger_binding" == *'" '* ]]; then
     _qai_original_trigger_widget="${{_qai_trigger_binding##*\" }}"
 fi
-# Fallback to expand-or-complete if nothing found
-[[ -z "$_qai_original_trigger_widget" ]] && _qai_original_trigger_widget="expand-or-complete"
+# Fallback to .expand-or-complete (built-in, not wrapped) if nothing found
+# The dot prefix bypasses plugin wrappers that may break completion
+[[ -z "$_qai_original_trigger_widget" ]] && _qai_original_trigger_widget=".expand-or-complete"
 unset _qai_trigger_binding
 
 # Trigger key handler - dispatch based on buffer content and mode
@@ -48,7 +49,7 @@ _qai_trigger_handler() {{
         _qai_start
     else
         # Normal completion/action for this key
-        zle "${{_qai_original_trigger_widget:-expand-or-complete}}"
+        zle "${{_qai_original_trigger_widget:-.expand-or-complete}}"
     fi
 }}
 
@@ -380,14 +381,14 @@ mod tests {
 
         // CRITICAL: Must fallback to original widget when NOT triggering AI mode
         assert!(
-            script.contains(r#"zle "${_qai_original_trigger_widget:-expand-or-complete}""#),
+            script.contains(r#"zle "${_qai_original_trigger_widget:-.expand-or-complete}""#),
             "Script must call original trigger widget with fallback for normal completion"
         );
 
-        // Must have a fallback to expand-or-complete
+        // Must have a fallback to .expand-or-complete (built-in, bypasses wrappers)
         assert!(
-            script.contains(r#"_qai_original_trigger_widget="expand-or-complete""#),
-            "Script must have expand-or-complete as default fallback"
+            script.contains(r#"_qai_original_trigger_widget=".expand-or-complete""#),
+            "Script must have .expand-or-complete as default fallback"
         );
     }
 
