@@ -142,7 +142,15 @@ pub fn check_api_key_configured() -> bool {
             && let Ok(content) = std::fs::read_to_string(&config_path)
         {
             // Simple check for api_key in config
-            if content.contains("api_key:") && !content.contains("api_key: null") {
+            let has_api_key = (content.contains("api-key:") || content.contains("api_key:"))
+                && !content.contains("api-key: null")
+                && !content.contains("api_key: null");
+            if has_api_key {
+                return true;
+            }
+
+            // Allow explicit opt-out
+            if content.contains("allow-no-api-key: true") || content.contains("allow_no_api_key: true") {
                 return true;
             }
         }

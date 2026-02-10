@@ -3,9 +3,19 @@
 
 # OpenAI API key (can also use QAI_API_KEY environment variable)
 # api-key: "sk-your-key-here"
+# api_key: "sk-your-key-here"   # snake_case also accepted
+
+# Allow running without an API key (for local OpenAI-compatible models)
+# allow-no-api-key: true
 
 # Model to use (default: gpt-4o-mini)
 model: "gpt-4o-mini"
+
+# Max tokens to generate (default: 500)
+# max-tokens: 500
+
+# HTTP timeout in seconds (default: 30)
+# http-timeout-secs: 30
 
 # API base URL (default: https://api.openai.com/v1)
 api-base: "https://api.openai.com/v1"

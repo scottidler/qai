@@ -29,7 +29,17 @@ impl Default for BindingsConfig {
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     /// OpenAI API key (can also be set via QAI_API_KEY env var)
+    #[serde(alias = "api_key")]
     pub api_key: Option<String>,
+    /// Allow running without an API key (useful for local OpenAI-compatible models)
+    #[serde(alias = "allow_no_api_key")]
+    pub allow_no_api_key: bool,
+    /// Max tokens to generate (default: 500)
+    #[serde(alias = "max_tokens")]
+    pub max_tokens: u32,
+    /// HTTP timeout in seconds (default: 30)
+    #[serde(alias = "http_timeout_secs")]
+    pub http_timeout_secs: u64,
     /// Model to use (default: gpt-4o-mini)
     pub model: String,
     /// API base URL (default: https://api.openai.com/v1)
@@ -45,6 +55,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             api_key: None,
+            allow_no_api_key: false,
+            max_tokens: 500,
+            http_timeout_secs: 30,
             model: "gpt-4o-mini".to_string(),
             api_base: "https://api.openai.com/v1".to_string(),
             debug: false,
@@ -63,7 +76,10 @@ impl Config {
             return Some(key);
         }
         // Fall back to config file
-        self.api_key.clone()
+        match &self.api_key {
+            Some(key) if !key.is_empty() => Some(key.clone()),
+            _ => None,
+        }
     }
 
     /// Get API key from config only (for testing without touching env vars)
@@ -139,6 +155,9 @@ mod tests {
         assert_eq!(config.api_base, "https://api.openai.com/v1");
         assert!(!config.debug);
         assert!(config.api_key.is_none());
+        assert!(!config.allow_no_api_key);
+        assert_eq!(config.max_tokens, 500);
+        assert_eq!(config.http_timeout_secs, 30);
         assert_eq!(config.bindings.trigger, "tab");
     }
 
@@ -151,6 +170,8 @@ mod tests {
 api-key: test-key-123
 model: gpt-4o
 api-base: https://custom.api.com/v1
+max-tokens: 750
+http-timeout-secs: 45
 debug: true
 bindings:
   trigger: ctrl-space
@@ -160,6 +181,9 @@ bindings:
 
         let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
         assert_eq!(config.api_key, Some("test-key-123".to_string()));
+        assert!(!config.allow_no_api_key);
+        assert_eq!(config.max_tokens, 750);
+        assert_eq!(config.http_timeout_secs, 45);
         assert_eq!(config.model, "gpt-4o");
         assert_eq!(config.api_base, "https://custom.api.com/v1");
         assert!(config.debug);
@@ -183,6 +207,9 @@ model: custom-model
         assert_eq!(config.api_base, "https://api.openai.com/v1");
         assert!(!config.debug);
         assert!(config.api_key.is_none());
+        assert!(!config.allow_no_api_key);
+        assert_eq!(config.max_tokens, 500);
+        assert_eq!(config.http_timeout_secs, 30);
     }
 
     #[test]
@@ -193,6 +220,9 @@ model: custom-model
         let config = Config::load(Some(&file.path().to_path_buf())).unwrap();
         assert_eq!(config.model, "gpt-4o-mini");
         assert_eq!(config.api_base, "https://api.openai.com/v1");
+        assert!(!config.allow_no_api_key);
+        assert_eq!(config.max_tokens, 500);
+        assert_eq!(config.http_timeout_secs, 30);
     }
 
     #[test]
