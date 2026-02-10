@@ -80,19 +80,27 @@ impl std::error::Error for ApiValidationError {}
 #[derive(Debug)]
 pub struct OpenAIClient {
     client: reqwest::Client,
-    api_key: String,
+    api_key: Option<String>,
     api_base: String,
     model: String,
+    max_tokens: u32,
+    http_timeout_secs: u64,
 }
 
 impl OpenAIClient {
     pub fn new(config: &Config) -> Result<Self> {
-        let api_key = config.get_api_key().ok_or_else(|| {
-            eyre!("No API key found. Set QAI_API_KEY environment variable or add api_key to ~/.config/qai/qai.yml")
-        })?;
+        let api_key = match config.get_api_key() {
+            Some(key) => Some(key),
+            None if config.allow_no_api_key => None,
+            None => {
+                return Err(eyre!(
+                    "No API key found. Set QAI_API_KEY environment variable or add api-key to ~/.config/qai/qai.yml"
+                ));
+            }
+        };
 
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(config.http_timeout_secs))
             .build()
             .context("Failed to create HTTP client")?;
 
@@ -101,21 +109,31 @@ impl OpenAIClient {
             api_key,
             api_base: config.api_base.clone(),
             model: config.model.clone(),
+            max_tokens: config.max_tokens,
+            http_timeout_secs: config.http_timeout_secs,
         })
     }
 
     #[cfg(test)]
-    pub fn new_with_base(api_key: String, api_base: String, model: String) -> Result<Self> {
+    pub fn new_with_base(
+        api_key: String,
+        api_base: String,
+        model: String,
+        max_tokens: u32,
+        http_timeout_secs: u64,
+    ) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(http_timeout_secs))
             .build()
             .context("Failed to create HTTP client")?;
 
         Ok(Self {
             client,
-            api_key,
+            api_key: Some(api_key),
             api_base,
             model,
+            max_tokens,
+            http_timeout_secs,
         })
     }
 
@@ -123,12 +141,17 @@ impl OpenAIClient {
     /// This endpoint authenticates but does NOT consume tokens
     #[allow(dead_code)]
     pub async fn validate_api_key(&self) -> std::result::Result<(), ApiValidationError> {
+        let api_key = match &self.api_key {
+            Some(key) => key,
+            None => return Err(ApiValidationError::NotConfigured),
+        };
+
         let url = format!("{}/models", self.api_base);
 
         let response = self
             .client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", format!("Bearer {}", api_key))
             .send()
             .await
             .map_err(|e| ApiValidationError::NetworkError(e.to_string()))?;
@@ -178,19 +201,24 @@ impl OpenAIClient {
                 },
             ],
             temperature: 0.0,
-            max_tokens: 500,
+            max_tokens: self.max_tokens,
         };
 
         log::debug!("Sending request to: {}", url);
         log::debug!("Model: {}", self.model);
         log::debug!("User query: {}", user_query);
 
-        let response = self
+        let mut request_builder = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&request)
+            .json(&request);
+
+        if let Some(key) = &self.api_key {
+            request_builder = request_builder.header("Authorization", format!("Bearer {}", key));
+        }
+
+        let response = request_builder
             .send()
             .await
             .context("Failed to send request to OpenAI API")?;
@@ -226,10 +254,14 @@ impl OpenAIClient {
 
 /// Validate API key using config
 pub async fn validate_api_key_from_config(config: &Config) -> std::result::Result<(), ApiValidationError> {
-    let api_key = config.get_api_key().ok_or(ApiValidationError::NotConfigured)?;
+    let api_key = match config.get_api_key() {
+        Some(key) => key,
+        None if config.allow_no_api_key => return Ok(()),
+        None => return Err(ApiValidationError::NotConfigured),
+    };
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(config.http_timeout_secs))
         .build()
         .map_err(|e| ApiValidationError::NetworkError(e.to_string()))?;
 
@@ -300,9 +332,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("test-api-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string())
-                .unwrap();
+        let client = OpenAIClient::new_with_base(
+            "test-api-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("You are a shell assistant", "list files").await;
 
@@ -320,8 +357,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("test-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "test-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await.unwrap();
         assert_eq!(result, "git status");
@@ -337,8 +380,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("bad-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "bad-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -357,8 +406,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -377,8 +432,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -396,8 +457,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -416,7 +483,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let _ = client.query("system prompt", "user query").await;
     }
@@ -431,8 +505,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -446,6 +526,8 @@ mod tests {
             "test-key".to_string(),
             "https://api.example.com".to_string(),
             "gpt-4o-mini".to_string(),
+            500,
+            30,
         );
         assert!(result.is_ok());
     }
@@ -456,12 +538,16 @@ mod tests {
             "my-api-key".to_string(),
             "https://custom.api.com/v1".to_string(),
             "gpt-4o".to_string(),
+            500,
+            30,
         )
         .unwrap();
 
-        assert_eq!(client.api_key, "my-api-key");
+        assert_eq!(client.api_key, Some("my-api-key".to_string()));
         assert_eq!(client.api_base, "https://custom.api.com/v1");
         assert_eq!(client.model, "gpt-4o");
+        assert_eq!(client.max_tokens, 500);
+        assert_eq!(client.http_timeout_secs, 30);
     }
 
     // API validation tests
@@ -477,8 +563,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("valid-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "valid-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.validate_api_key().await;
         assert!(result.is_ok());
@@ -494,9 +586,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("invalid-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string())
-                .unwrap();
+        let client = OpenAIClient::new_with_base(
+            "invalid-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.validate_api_key().await;
         assert!(matches!(result, Err(ApiValidationError::InvalidKey(_))));
@@ -512,9 +609,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("limited-key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string())
-                .unwrap();
+        let client = OpenAIClient::new_with_base(
+            "limited-key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.validate_api_key().await;
         assert!(matches!(result, Err(ApiValidationError::AccessDenied(_))));
@@ -548,8 +650,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.query_multi("system", "list files", 3).await;
         assert!(result.is_ok());
@@ -565,8 +673,14 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client =
-            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string()).unwrap();
+        let client = OpenAIClient::new_with_base(
+            "key".to_string(),
+            mock_server.uri(),
+            "gpt-4o-mini".to_string(),
+            500,
+            30,
+        )
+        .unwrap();
 
         let result = client.validate_api_key().await;
         assert!(matches!(result, Err(ApiValidationError::UnexpectedError(_))));
