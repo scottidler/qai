@@ -359,7 +359,7 @@ impl HistoryStore {
     /// Get all patterns sorted by usage
     pub fn get_patterns_by_usage(&self) -> Vec<&QueryPattern> {
         let mut patterns: Vec<&QueryPattern> = self.patterns.values().collect();
-        patterns.sort_by(|a, b| b.query_count.cmp(&a.query_count));
+        patterns.sort_by_key(|b| std::cmp::Reverse(b.query_count));
         patterns
     }
 

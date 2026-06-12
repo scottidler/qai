@@ -84,7 +84,6 @@ pub struct OpenAIClient {
     api_base: String,
     model: String,
     max_tokens: u32,
-    http_timeout_secs: u64,
 }
 
 impl OpenAIClient {
@@ -110,7 +109,6 @@ impl OpenAIClient {
             api_base: config.api_base.clone(),
             model: config.model.clone(),
             max_tokens: config.max_tokens,
-            http_timeout_secs: config.http_timeout_secs,
         })
     }
 
@@ -133,7 +131,6 @@ impl OpenAIClient {
             api_base,
             model,
             max_tokens,
-            http_timeout_secs,
         })
     }
 
@@ -406,14 +403,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -432,14 +424,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -457,14 +444,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -483,14 +465,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o".to_string(), 500, 30).unwrap();
 
         let _ = client.query("system prompt", "user query").await;
     }
@@ -505,14 +481,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.query("system", "query").await;
 
@@ -547,7 +518,6 @@ mod tests {
         assert_eq!(client.api_base, "https://custom.api.com/v1");
         assert_eq!(client.model, "gpt-4o");
         assert_eq!(client.max_tokens, 500);
-        assert_eq!(client.http_timeout_secs, 30);
     }
 
     // API validation tests
@@ -650,14 +620,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.query_multi("system", "list files", 3).await;
         assert!(result.is_ok());
@@ -673,14 +638,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = OpenAIClient::new_with_base(
-            "key".to_string(),
-            mock_server.uri(),
-            "gpt-4o-mini".to_string(),
-            500,
-            30,
-        )
-        .unwrap();
+        let client =
+            OpenAIClient::new_with_base("key".to_string(), mock_server.uri(), "gpt-4o-mini".to_string(), 500, 30)
+                .unwrap();
 
         let result = client.validate_api_key().await;
         assert!(matches!(result, Err(ApiValidationError::UnexpectedError(_))));

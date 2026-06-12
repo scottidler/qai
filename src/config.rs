@@ -304,6 +304,9 @@ model: custom-model
     fn test_config_serialization() {
         let config = Config {
             api_key: Some("test-key".to_string()),
+            allow_no_api_key: false,
+            max_tokens: 500,
+            http_timeout_secs: 30,
             model: "test-model".to_string(),
             api_base: "https://test.api.com".to_string(),
             debug: true,
