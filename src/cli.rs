@@ -1,6 +1,7 @@
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::config::xdg_config_dir;
 use crate::{build_status_footer, get_log_file};
 
 /// Build the after_help dynamically with status info
@@ -136,7 +137,7 @@ pub fn check_api_key_configured() -> bool {
     }
 
     // Check config file
-    if let Some(config_dir) = dirs::config_dir() {
+    if let Some(config_dir) = xdg_config_dir() {
         let config_path = config_dir.join("qai").join("qai.yml");
         if config_path.exists()
             && let Ok(content) = std::fs::read_to_string(&config_path)

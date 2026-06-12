@@ -14,6 +14,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::config::xdg_data_dir;
+
 /// A single query interaction record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryRecord {
@@ -196,7 +198,7 @@ impl HistoryStore {
 
     /// Get the default data directory
     pub fn default_data_dir() -> PathBuf {
-        dirs::data_local_dir()
+        xdg_data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("qai")
             .join("history")

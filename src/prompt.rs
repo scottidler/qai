@@ -1,6 +1,8 @@
 use eyre::{Context, Result};
 use std::fs;
 
+use crate::config::xdg_config_dir;
+
 /// Default system prompt embedded at compile time
 const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../prompts/system.pmt");
 
@@ -35,7 +37,7 @@ pub fn load_prompt_from_file(path: &std::path::Path) -> Result<String> {
 /// 2. Embedded default
 pub fn load_system_prompt() -> Result<String> {
     // Check for user override
-    if let Some(config_dir) = dirs::config_dir() {
+    if let Some(config_dir) = xdg_config_dir() {
         let user_prompt = config_dir
             .join(env!("CARGO_PKG_NAME"))
             .join("prompts")

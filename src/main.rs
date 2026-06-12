@@ -14,7 +14,7 @@ mod tools;
 
 use api::{OpenAIClient, validate_api_key_from_config};
 use cli::{Cli, Commands, check_api_key_configured, check_fzf_status};
-use config::Config;
+use config::{Config, xdg_config_dir, xdg_data_dir};
 use history::HistoryStore;
 use prompt::{PromptContext, load_system_prompt, render_prompt};
 use shell::generate_init_script;
@@ -69,7 +69,7 @@ async fn handle_query(query: &str, config: &Config, multi: bool, count: usize) -
 /// Load multi-result system prompt
 fn load_multi_result_prompt(count: usize) -> Result<String> {
     // Check for custom multi prompt
-    if let Some(config_dir) = dirs::config_dir() {
+    if let Some(config_dir) = xdg_config_dir() {
         let prompt_file = config_dir.join("qai").join("system-prompt-multi.txt");
         if prompt_file.exists() {
             let template =
@@ -127,7 +127,7 @@ async fn handle_validate_api(config: &Config) -> Result<()> {
 
 /// Get the log directory path
 pub fn get_log_dir() -> PathBuf {
-    dirs::data_local_dir()
+    xdg_data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("qai")
         .join("logs")
