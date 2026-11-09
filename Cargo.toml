@@ -23,12 +23,12 @@ uuid = { version = "1.11", features = ["v4", "serde"] }
 which = "7.0"
 
 [build-dependencies]
+build-version = { git = "https://github.com/tatari-tv/build-version-rs", tag = "v0.1.0", version = "0.1.0" }
 
 [dev-dependencies]
 serial_test = "3.2.0"
 tempfile = "3.23.0"
 wiremock = "0.6.5"
-# For build.rs if needed
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin_include)"] }

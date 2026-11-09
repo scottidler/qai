@@ -20,7 +20,7 @@ fn get_after_help() -> String {
 #[command(
     name = "qai",
     about = "Natural language to shell commands via LLM",
-    version = env!("GIT_DESCRIBE"),
+    version = env!("BUILD_VERSION"),
     after_help = "Run 'qai --help' for status information"
 )]
 pub struct Cli {
